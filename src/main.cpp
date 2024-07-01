@@ -1854,7 +1854,7 @@ gb_internal void show_timings(Checker *c, Timings *t) {
 	}
 }
 
-gb_internal void export_dependencies(Parser *p) {
+gb_internal void export_dependencies(Parser *p, Checker *checker) {
 	GB_ASSERT(build_context.export_dependencies_format != DependenciesExportUnspecified);
 
 	if (build_context.export_dependencies_file.len <= 0) {
@@ -1879,12 +1879,13 @@ gb_internal void export_dependencies(Parser *p) {
 
 		gb_fprintf(&f, "%.*s:", LIT(exe_name));
 
+		/* Arbitrary line break value. Maybe make this better? */
+		isize max_line_length = 80 - 2;
 		isize current_line_length = exe_name.len + 1;
 
 		for(AstPackage *pkg : p->packages) {
 			for(AstFile *file : pkg->files) {
-				/* Arbitrary line break value. Maybe make this better? */
-				if (current_line_length >= 80-2) {
+				if (current_line_length >= max_line_length) {
 					gb_file_write(&f, " \\\n ", 4);
 					current_line_length = 1;
 				}
@@ -1904,6 +1905,29 @@ gb_internal void export_dependencies(Parser *p) {
 			}
 		}
 
+		StringMapEntry<LoadFileCache *> *cache_begin = begin(checker->info.load_file_cache);
+		StringMapEntry<LoadFileCache *> *cache_end = end(checker->info.load_file_cache);
+		for (StringMapEntry<LoadFileCache *> *entry = cache_begin; entry != cache_end; entry++) {
+			String path = entry->value->path;
+			if (current_line_length >= max_line_length) {
+				gb_file_write(&f, " \\\n ", 4);
+				current_line_length = 1;
+			}
+
+			gb_file_write(&f, " ", 1);
+			current_line_length++;
+
+			for (isize k = 0; k < path.len; k++) {
+				char part = path.text[k];
+				if (part == ' ') {
+					gb_file_write(&f, "\\", 1);
+					current_line_length++;
+				}
+				gb_file_write(&f, &part, 1);
+				current_line_length++;
+			}
+		}
+
 		gb_fprintf(&f, "\n");
 	} else if (build_context.export_dependencies_format == DependenciesExportJson) {
 		gb_fprintf(&f, "{\n");
@@ -1914,6 +1938,12 @@ gb_internal void export_dependencies(Parser *p) {
 			for(AstFile *file : pkg->files) {
 				gb_fprintf(&f, "\t\t\"%.*s\",\n", LIT(file->fullpath));
 			}
+		}
+		StringMapEntry<LoadFileCache *> *load_begin = begin(checker->info.load_file_cache);
+		StringMapEntry<LoadFileCache *> *load_end = end(checker->info.load_file_cache);
+		for (StringMapEntry<LoadFileCache *> *entry = load_begin; entry != load_end; entry++) {
+			String path = entry->value->path;
+			gb_fprintf(&f, "\t\t\"%.*s\",\n", LIT(path));
 		}
 
 		gb_fprintf(&f, "\t],\n");
@@ -3252,7 +3282,7 @@ int main(int arg_count, char const **arg_ptr) {
 					}
 
 					if (build_context.export_dependencies_format != DependenciesExportUnspecified) {
-						export_dependencies(parser);
+						export_dependencies(parser, checker);
 					}
 					return result;
 				}
@@ -3268,7 +3298,7 @@ int main(int arg_count, char const **arg_ptr) {
 	}
 
 	if (build_context.export_dependencies_format != DependenciesExportUnspecified) {
-		export_dependencies(parser);
+		export_dependencies(parser, checker);
 	}
 
 	if (run_output) {
